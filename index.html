@@ -396,8 +396,8 @@
         <div class="stitle">💳 Cartão Inter</div>
         <div class="cartao-info">
           <div class="ctitle">Parcela mensal</div>
-          <div class="cval">R$ 820,75</div>
-          <div class="csub">20x — dívida total R$ 9.373</div>
+          <div class="cval" id="cartaoParcelaVal">R$ 1.214,00</div>
+          <div class="csub">20x — Jun/R$1.214 → Jul+/R$870</div>
         </div>
         <div id="alertaCartao" class="alert-box yellow">Calcule seus ganhos para ver se consegue pagar.</div>
       </div>
@@ -410,9 +410,8 @@
           <div class="gasto-item"><span class="name">Seguro do carro</span><span class="value">R$ 160</span></div>
           <div class="gasto-item"><span class="name">Plano telefone</span><span class="value">R$ 60</span></div>
           <div class="gasto-item"><span class="name">Pensão alimentícia</span><span class="value">R$ 490</span></div>
-          <div class="gasto-item"><span class="name">Gasolina mensal</span><span class="value">R$ 1.350</span></div>
-          <div class="gasto-item"><span class="name">Parcela cartão</span><span class="value" style="color:var(--purple)">R$ 821</span></div>
-          <div class="gasto-item total"><span class="name">TOTAL FIXO</span><span class="value" id="totalGastos">R$ 4.631</span></div>
+          <div class="gasto-item"><span class="name">Parcela cartão</span><span class="value" style="color:var(--purple)" id="gastoCartaoVal">R$ 1.214</span></div>
+          <div class="gasto-item total"><span class="name">TOTAL FIXO</span><span class="value" id="totalGastos">R$ 3.574</span></div>
         </div>
       </div>
 
@@ -440,7 +439,10 @@
   function getGastosFixos(mesAno) {
     const [ano, mes] = mesAno.split('-').map(Number);
     const temCarro = !(ano > 2026 || (ano === 2026 && mes >= 8));
-    return (temCarro ? 1500 : 0) + 250 + 160 + 60 + 490 + 1350 + 820.75;
+    // Primeiro vencimento 02/06 = R$1.214, a partir de 02/07 = R$870
+    let parcCartao = 1214;
+    if (ano > 2026 || (ano === 2026 && mes >= 7)) parcCartao = 870;
+    return (temCarro ? 1500 : 0) + 250 + 160 + 60 + 490 + parcCartao;
   }
 
   function getMesAtual() { return document.getElementById('mesSel').value; }
@@ -483,9 +485,13 @@
 
     const [ano, mesNum] = mes.split('-').map(Number);
     const temCarro = !(ano > 2026 || (ano === 2026 && mesNum >= 8));
+    let parcCartao = 1214;
+    if (ano > 2026 || (ano === 2026 && mesNum >= 7)) parcCartao = 870;
     document.getElementById('gastoCarroVal').textContent = temCarro ? 'R$ 1.500' : 'R$ 0';
     document.getElementById('gastoCarroTag').textContent = temCarro ? '(até jul)' : '(quitado ✓)';
     document.getElementById('gastoCarroItem').style.opacity = temCarro ? '1' : '0.4';
+    document.getElementById('gastoCartaoVal').textContent = 'R$ ' + parcCartao.toLocaleString('pt-BR', {minimumFractionDigits:2});
+    document.getElementById('cartaoParcelaVal').textContent = 'R$ ' + parcCartao.toLocaleString('pt-BR', {minimumFractionDigits:2});
     document.getElementById('totalGastos').textContent = fmt(gastos);
     document.getElementById('projGastos').textContent = '- ' + fmt(gastos);
 
@@ -495,7 +501,8 @@
     const totalContasPago = contas.filter(c=>c.pago).reduce((s,c)=>s+c.valor,0);
     const qtdPend = contas.filter(c=>!c.pago).length;
     const liquido = totalG - totalD;
-    const dias = ganhos.length;
+    const diasUnicos = [...new Set(ganhos.map(g=>g.data))];
+    const dias = diasUnicos.length;
     const media = dias > 0 ? totalG/dias : 0;
     const proj = media * DIAS_UTEIS;
     const sobra = proj - gastos - totalD;
@@ -528,7 +535,7 @@
 
     const aC = document.getElementById('alertaCartao');
     if(dias===0){aC.className='alert-box yellow';aC.textContent='Calcule seus ganhos para ver se consegue pagar.';}
-    else if(proj>=820.75+gastos){aC.className='alert-box green';aC.textContent='✓ Projeção cobre a parcela com folga!';}
+    else if(proj>=parcCartao+gastos){aC.className='alert-box green';aC.textContent='✓ Projeção cobre a parcela com folga!';}
     else{aC.className='alert-box red';aC.textContent='⚠ Projeção abaixo do necessário!';}
 
     const aG = document.getElementById('alertaGeral');
