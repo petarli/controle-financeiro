@@ -240,6 +240,18 @@
   .bar-col .b { width: 100%; border-radius: 3px 3px 0 0; min-height: 2px; }
   .bar-col .b.above { background: var(--green); } .bar-col .b.below { background: var(--red); }
   .bar-col .bl { font-size: 8px; color: var(--muted); text-align: center; }
+
+  /* GRÁFICO DESPESAS POR CATEGORIA */
+  .desp-cat-row {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 12px;
+  }
+  .desp-cat-emoji { font-size: 16px; width: 24px; flex-shrink: 0; }
+  .desp-cat-info { flex: 1; min-width: 0; }
+  .desp-cat-name { font-size: 12px; color: var(--muted2); margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .desp-cat-name span { font-family: 'Bebas Neue', sans-serif; font-size: 1rem; color: var(--text); }
+  .desp-cat-bar-track { height: 6px; background: var(--border2); border-radius: 10px; overflow: hidden; }
+  .desp-cat-bar-fill { height: 100%; border-radius: 10px; transition: width 0.6s; }
   .toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface2); border: 1px solid var(--green); border-radius: 10px; padding: 12px 18px; font-size: 13px; font-weight: 600; color: var(--green); transform: translateY(80px); opacity: 0; transition: all 0.3s; z-index: 100; }
   .toast.show { transform: translateY(0); opacity: 1; }
   .btn-reset { background: none; border: 1px solid var(--border2); color: var(--muted); border-radius: 7px; padding: 6px 12px; font-size: 11px; font-family: 'Mulish', sans-serif; font-weight: 700; cursor: pointer; transition: all 0.2s; }
@@ -376,7 +388,18 @@
             </table>
           </div>
         </div>
-      </div>
+
+        <!-- GRÁFICO DESPESAS POR CATEGORIA -->
+        <div class="table-card" style="margin-top:16px;padding:20px">
+          <div class="table-head" style="padding:0 0 16px;border-bottom:1px solid var(--border)">
+            <span class="title">📊 Gastos por Categoria</span>
+          </div>
+          <div id="chartDespCats" style="margin-top:16px">
+            <div style="color:var(--muted);font-size:12px;padding:20px 0;text-align:center">Nenhuma despesa registrada ainda.</div>
+          </div>
+        </div>
+
+      </div><!-- fim tab-despesas -->
 
       <!-- TAB CONTAS A PAGAR -->
       <div id="tab-contas" class="tab-content">
@@ -584,8 +607,16 @@
     const liquido = totalG - totalD;
     const diasUnicos = [...new Set(ganhos.map(g=>g.data))];
     const dias = diasUnicos.length;
-    const media = dias > 0 ? totalG/dias : 0;
-    const proj = media * DIAS_UTEIS;
+
+    // Separar entregas (recorrente diário) de renda pontual
+    const ganhosEntregas = ganhos.filter(g => (g.categoria||'').includes('Entregas'));
+    const ganhosPontual = ganhos.filter(g => !(g.categoria||'').includes('Entregas'));
+    const totalEntregas = ganhosEntregas.reduce((s,g)=>s+g.valor,0);
+    const totalPontual = ganhosPontual.reduce((s,g)=>s+g.valor,0);
+    const diasEntregas = [...new Set(ganhosEntregas.map(g=>g.data))].length;
+    const mediaEntregas = diasEntregas > 0 ? totalEntregas/diasEntregas : 0;
+    // Projeção = entregas diárias × 26 dias + renda pontual (já recebida)
+    const proj = (mediaEntregas * DIAS_UTEIS) + totalPontual;
     const sobra = proj - gastos - totalD;
 
     document.getElementById('kpiTotal').textContent = fmt(totalG);
@@ -594,7 +625,7 @@
     document.getElementById('kpiDespQtd').textContent = despesas.length + ' despesa' + (despesas.length!==1?'s':'');
     document.getElementById('kpiLiquido').textContent = fmt(liquido);
     document.getElementById('kpiLiquido').className = 'val ' + (liquido>=0?'green':'red');
-    document.getElementById('kpiMedia').textContent = fmt(media);
+    document.getElementById('kpiMedia').textContent = fmt(mediaEntregas);
     document.getElementById('kpiContasPend').textContent = fmt(totalContasPend);
     document.getElementById('kpiContasQtd').textContent = qtdPend + ' pendente' + (qtdPend!==1?'s':'');
     document.getElementById('kpiSobra').textContent = fmt(sobra);
@@ -608,7 +639,7 @@
     document.getElementById('metaPct').textContent = pct.toFixed(0)+'%';
     document.getElementById('metaLeft').textContent = totalG>=META_MENSAL?'✓ Meta atingida!':'Acumulado: '+fmt(totalG);
 
-    document.getElementById('projDias').textContent = dias+' / '+DIAS_UTEIS;
+    document.getElementById('projDias').textContent = diasEntregas+' / '+DIAS_UTEIS;
     document.getElementById('projGanho').textContent = fmt(totalG);
     document.getElementById('projDespesas').textContent = '- '+fmt(totalD);
     document.getElementById('projTotal').textContent = fmt(proj);
@@ -661,6 +692,9 @@
         <button class="btn-del-conta" onclick="event.stopPropagation();remover('contas','${c.id}')">🗑</button>
       </div>`;
     }).join('');}
+
+    // Gráfico despesas por categoria
+    renderDespCatChart(despesas);
 
     // Mini gráfico
     const ult=[...ganhos].sort((a,b)=>a.data.localeCompare(b.data)).slice(-10);
@@ -731,6 +765,41 @@
       { id: 'pensao', nome: 'Pensão alimentícia', valor: 490 },
       { id: 'cartao', nome: 'Parcela cartão', valor: parcCartao },
     ];
+  }
+
+  function renderDespCatChart(despesas) {
+    const el = document.getElementById('chartDespCats');
+    if (!el) return;
+    if (!despesas.length) {
+      el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:20px 0;text-align:center">Nenhuma despesa registrada ainda.</div>';
+      return;
+    }
+    // Agrupar por categoria
+    const cats = {};
+    despesas.forEach(d => {
+      const cat = d.categoria || '📦 Outros';
+      cats[cat] = (cats[cat] || 0) + d.valor;
+    });
+    // Ordenar por valor
+    const sorted = Object.entries(cats).sort((a,b) => b[1]-a[1]);
+    const maxVal = sorted[0][1];
+    const cores = ['#00e5ff','#ff3d6b','#ffcc00','#00ff87','#b06fff','#ff7730','#60a5fa','#f472b6'];
+    el.innerHTML = sorted.map(([cat, val], i) => {
+      const pct = Math.max(4, (val/maxVal)*100);
+      const cor = cores[i % cores.length];
+      const pctTotal = ((val / despesas.reduce((s,d)=>s+d.valor,0))*100).toFixed(0);
+      return `<div class="desp-cat-row">
+        <div class="desp-cat-info">
+          <div class="desp-cat-name">
+            <span style="color:var(--muted2);font-size:12px;font-family:'Mulish',sans-serif">${cat} <small style="color:var(--muted)">(${pctTotal}%)</small></span>
+            <span>${fmt(val)}</span>
+          </div>
+          <div class="desp-cat-bar-track">
+            <div class="desp-cat-bar-fill" style="width:${pct}%;background:${cor}"></div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
   }
 
   function toggleGastoFixo(id) {
