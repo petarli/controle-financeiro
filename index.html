@@ -24,6 +24,22 @@
   select { background: transparent; border: none; outline: none; color: var(--cyan); font-family: 'Mulish', sans-serif; font-size: 13px; font-weight: 700; cursor: pointer; }
   select option { background: #161922; color: var(--text); }
 
+  /* SYNC */
+  .sync-bar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 24px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; position: relative; z-index: 1; }
+  .sync-input { background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px; padding: 8px 12px; font-family: 'Mulish', sans-serif; font-size: 12px; color: var(--text); outline: none; flex: 1; min-width: 200px; transition: border-color 0.2s; }
+  .sync-input:focus { border-color: var(--cyan); }
+  .sync-input::placeholder { color: var(--muted); }
+  .btn-sync { background: rgba(0,229,255,0.1); border: 1px solid rgba(0,229,255,0.3); color: var(--cyan); border-radius: 8px; padding: 8px 14px; font-family: 'Mulish', sans-serif; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+  .btn-sync:hover { background: rgba(0,229,255,0.2); }
+  .btn-sync.green { background: rgba(0,255,135,0.1); border-color: rgba(0,255,135,0.3); color: var(--green); }
+  .btn-sync.red { background: rgba(255,61,107,0.1); border-color: rgba(255,61,107,0.3); color: var(--red); }
+  .sync-status { font-size: 11px; color: var(--muted2); display: flex; align-items: center; gap: 6px; }
+  .sync-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+  .sync-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .sync-dot.err { background: var(--red); }
+  .sync-dot.sync { background: var(--yellow); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
   .tabs { display: flex; gap: 4px; background: var(--surface); border: 1px solid var(--border2); border-radius: 10px; padding: 4px; margin-bottom: 24px; }
   .tab-btn { flex: 1; padding: 10px; border: none; border-radius: 7px; background: transparent; color: var(--muted2); font-family: 'Mulish', sans-serif; font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
   .tab-btn.active { background: var(--surface2); color: var(--cyan); border: 1px solid var(--border2); }
@@ -282,6 +298,16 @@
   </div>
 </header>
 
+<!-- BARRA DE SINCRONIZAÇÃO -->
+<div class="sync-bar">
+  <span style="font-size:12px;font-weight:700;color:var(--muted2);white-space:nowrap">☁️ Sync:</span>
+  <input class="sync-input" id="syncUrl" placeholder="Cole aqui a URL do seu Google Apps Script..." />
+  <button class="btn-sync" onclick="salvarUrl()">💾 Salvar URL</button>
+  <button class="btn-sync" onclick="syncEnviar()">⬆ Enviar</button>
+  <button class="btn-sync" onclick="syncReceber()">⬇ Receber</button>
+  <div class="sync-status"><div class="sync-dot" id="syncDot"></div><span id="syncMsg">Configure a URL para sincronizar</span></div>
+</div>
+
 <main>
   <div class="cards-top">
     <div class="kpi cyan"><div class="lbl">Ganho Total</div><div class="val cyan" id="kpiTotal">R$ 0</div><div class="sub" id="kpiDias">0 dias registrados</div></div>
@@ -528,6 +554,69 @@
 <script>
   const STORAGE_KEY = 'controle_v4';
   const META_DIARIA = 200, META_MENSAL = 5200, DIAS_UTEIS = 26;
+  const SYNC_URL_KEY = 'controle_sync_url';
+
+  // ============================================================
+  // SYNC COM GOOGLE SHEETS
+  // ============================================================
+  function getSyncUrl() { return localStorage.getItem(SYNC_URL_KEY) || ''; }
+
+  function salvarUrl() {
+    const url = document.getElementById('syncUrl').value.trim();
+    if (!url) { showToast('⚠ Cole a URL do Apps Script!', 'warn'); return; }
+    localStorage.setItem(SYNC_URL_KEY, url);
+    setSyncStatus('ok', '✓ URL salva!');
+    showToast('✓ URL salva com sucesso!');
+  }
+
+  function setSyncStatus(tipo, msg) {
+    const dot = document.getElementById('syncDot');
+    const txt = document.getElementById('syncMsg');
+    dot.className = 'sync-dot ' + tipo;
+    txt.textContent = msg;
+  }
+
+  async function syncEnviar() {
+    const url = getSyncUrl();
+    if (!url) { showToast('⚠ Configure a URL primeiro!', 'warn'); return; }
+    setSyncStatus('sync', 'Enviando dados...');
+    try {
+      const dados = loadData();
+      const resp = await fetch(url, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ acao: 'salvar', dados })
+      });
+      setSyncStatus('ok', '✓ Dados enviados! ' + new Date().toLocaleTimeString('pt-BR'));
+      showToast('✓ Sincronizado com Google Sheets!');
+    } catch(e) {
+      setSyncStatus('err', '✗ Erro ao enviar');
+      showToast('✗ Erro na sincronização', 'warn');
+    }
+  }
+
+  async function syncReceber() {
+    const url = getSyncUrl();
+    if (!url) { showToast('⚠ Configure a URL primeiro!', 'warn'); return; }
+    setSyncStatus('sync', 'Recebendo dados...');
+    try {
+      const resp = await fetch(url + '?acao=carregar');
+      const json = await resp.json();
+      if (json && json.dados) {
+        saveData(json.dados);
+        render();
+        setSyncStatus('ok', '✓ Dados recebidos! ' + new Date().toLocaleTimeString('pt-BR'));
+        showToast('✓ Dados carregados do Google Sheets!');
+      } else {
+        setSyncStatus('err', '✗ Nenhum dado encontrado');
+        showToast('✗ Nenhum dado no servidor', 'warn');
+      }
+    } catch(e) {
+      setSyncStatus('err', '✗ Erro ao receber');
+      showToast('✗ Erro na sincronização', 'warn');
+    }
+  }
 
   function getGastosFixos(mesAno) {
     const [ano, mes] = mesAno.split('-').map(Number);
@@ -870,6 +959,20 @@
     const mesAtual=hoje.substring(0,7);
     const sel=document.getElementById('mesSel');
     for(let o of sel.options){if(o.value===mesAtual){o.selected=true;break;}}
+    // Carregar URL salva
+    const urlSalva = getSyncUrl();
+    if (urlSalva) {
+      document.getElementById('syncUrl').value = urlSalva;
+      setSyncStatus('ok', '✓ URL configurada');
+    }
+    // Pré-carregar dados de maio 2026 se ainda não existirem
+    const dadosExistentes = loadData();
+    if (!dadosExistentes['2026-05'] || !dadosExistentes['2026-05'].ganhos || dadosExistentes['2026-05'].ganhos.length === 0) {
+      const dadosIniciais = {"2026-05":{"ganhos":[{"id":"1","data":"2026-05-01","valor":370,"categoria":"🚗 Entregas"},{"id":"2","data":"2026-05-02","valor":337,"categoria":"🚗 Entregas"},{"id":"3","data":"2026-05-04","valor":191,"categoria":"🚗 Entregas"},{"id":"4","data":"2026-05-05","valor":109,"categoria":"🚗 Entregas"},{"id":"5","data":"2026-05-05","valor":227,"categoria":"🚗 Entregas"},{"id":"6","data":"2026-05-06","valor":307,"categoria":"🚗 Entregas"},{"id":"7","data":"2026-05-06","valor":60,"categoria":"📦 Outros"},{"id":"8","data":"2026-05-07","valor":442,"categoria":"🚗 Entregas"},{"id":"9","data":"2026-05-08","valor":256,"categoria":"🚗 Entregas"},{"id":"10","data":"2026-05-09","valor":242,"categoria":"🚗 Entregas"},{"id":"11","data":"2026-05-09","valor":340,"categoria":"🎯 Bônus"},{"id":"12","data":"2026-05-10","valor":430,"categoria":"⭐ Extra"},{"id":"13","data":"2026-05-10","valor":192,"categoria":"⭐ Extra"},{"id":"14","data":"2026-05-13","valor":117,"categoria":"🚗 Entregas"}],"despesas":[{"id":"d1","data":"2026-05-02","valor":72,"categoria":"🍔 Alimentação","descricao":"mercado"},{"id":"d2","data":"2026-05-03","valor":160,"categoria":"🍔 Alimentação","descricao":"restaurante"},{"id":"d3","data":"2026-05-03","valor":43,"categoria":"📦 Outros","descricao":"diversos"},{"id":"d4","data":"2026-05-04","valor":76,"categoria":"⛽ Gasolina Extra","descricao":"gasolina e pedagio"},{"id":"d5","data":"2026-05-05","valor":63,"categoria":"⛽ Gasolina Extra","descricao":"gasolina e pedagio"},{"id":"d6","data":"2026-05-06","valor":80,"categoria":"⛽ Gasolina Extra","descricao":""},{"id":"d7","data":"2026-05-07","valor":114,"categoria":"⛽ Gasolina Extra","descricao":""},{"id":"d8","data":"2026-05-07","valor":8,"categoria":"📦 Outros","descricao":""},{"id":"d9","data":"2026-05-07","valor":15,"categoria":"📦 Outros","descricao":""},{"id":"d10","data":"2026-05-07","valor":29,"categoria":"📦 Outros","descricao":""},{"id":"d11","data":"2026-05-08","valor":8,"categoria":"🚨 Emergência","descricao":"coca"},{"id":"d12","data":"2026-05-08","valor":29,"categoria":"🚨 Emergência","descricao":"gasolina"},{"id":"d13","data":"2026-05-08","valor":20,"categoria":"⛽ Gasolina Extra","descricao":""},{"id":"d14","data":"2026-05-09","valor":230,"categoria":"🍔 Alimentação","descricao":""},{"id":"d15","data":"2026-05-09","valor":4,"categoria":"📦 Outros","descricao":"pedagio"},{"id":"d16","data":"2026-05-09","valor":60,"categoria":"⛽ Gasolina Extra","descricao":""},{"id":"d17","data":"2026-05-09","valor":55,"categoria":"🍔 Alimentação","descricao":"McDonald's"},{"id":"d18","data":"2026-05-10","valor":50,"categoria":"⛽ Gasolina Extra","descricao":""},{"id":"d19","data":"2026-05-10","valor":48,"categoria":"🚨 Emergência","descricao":"insulina"},{"id":"d20","data":"2026-05-11","valor":210,"categoria":"🍔 Alimentação","descricao":"dia das maes"},{"id":"d21","data":"2026-05-11","valor":50,"categoria":"🍔 Alimentação","descricao":""},{"id":"d22","data":"2026-05-11","valor":840,"categoria":"🔧 Manutenção Carro","descricao":""},{"id":"d23","data":"2026-05-12","valor":300,"categoria":"🔧 Manutenção Carro","descricao":"mão de obra"},{"id":"d24","data":"2026-05-12","valor":64,"categoria":"⛽ Gasolina Extra","descricao":""}],"contas":[],"gastosFixosPagos":{}}};
+      // Mesclar com dados existentes sem sobrescrever outros meses
+      Object.assign(dadosExistentes, dadosIniciais);
+      saveData(dadosExistentes);
+    }
     render();
   });
 
